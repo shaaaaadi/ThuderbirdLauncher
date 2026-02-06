@@ -1,0 +1,6 @@
+Run the following command from the project dir:
+>  dotnet publish -c Release -r win-x64 /p:PublishSingleFile=true
+
+
+The output exe will appear under:
+bin\Release\netX.X\win-x64\publish\
