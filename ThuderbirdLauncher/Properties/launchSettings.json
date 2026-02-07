@@ -2,7 +2,7 @@
   "profiles": {
     "ThuderbirdLauncher": {
       "commandName": "Project",
-      "commandLineArgs": "--to shadi.jubran@gmail.com --subject \"hi hi hi\" --body \"this is the body\\nline 2\" --attach \"C:\\Users\\jubransh\\Downloads\\rs_logo.png\""
+      "commandLineArgs": "--to shadi.jubran@gmail.com --subject \"hi hi hi\" --body \"this is the body\\nline 2\" --attach \"C:\\Users\\jubransh\\Pictures\\New folder\\2.jpeg;C:\\Users\\jubransh\\Pictures\\New folder\\1.jpeg;C:\\Users\\jubransh\\Pictures\\New folder\\example.docx\""
     }
   }
 }

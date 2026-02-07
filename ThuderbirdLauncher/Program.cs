@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
+using System.Linq;
+using System.Text;
 
 namespace ThuderbirdLauncher
 {
@@ -28,9 +30,12 @@ namespace ThuderbirdLauncher
                 string to = GetValue(args, "--to");
                 string subject = GetValue(args, "--subject") ?? "";
                 string body = GetValue(args, "--body") ?? "";
+                body = body?.Replace("\\r\\n", "\r\n").Replace("\\n", "\n").Replace("\\r", "\r");
+                // Gather raw values of --attach (supports --attach <val> and --attach=<val>)
+                var attachRaw = GetValues(args, "--attach");
 
-                // Multiple --attach can be provided
-                var attachments = GetValues(args, "--attach");
+                // Expand semicolon-delimited lists into individual paths
+                var attachments = ExpandAttachmentArgs(attachRaw).ToList();
 
                 // Basic validation
                 if (string.IsNullOrWhiteSpace(to))
@@ -41,7 +46,7 @@ namespace ThuderbirdLauncher
                     return EXIT_BAD_ARGS;
                 }
 
-                // Optional: validate attachment paths exist (you can relax this if needed)
+                // Validate that attachment paths exist
                 foreach (var p in attachments)
                 {
                     if (!File.Exists(p))
@@ -113,21 +118,80 @@ namespace ThuderbirdLauncher
             return list;
         }
 
+        /// <summary>
+        /// Expands one or more --attach values into individual paths.
+        /// Supports semicolon-delimited lists like: "C:\a.pdf;D:\b.jpg"
+        /// To include a literal semicolon in a path, escape it as "\;".
+        /// </summary>
+        private static IEnumerable<string> ExpandAttachmentArgs(IEnumerable<string> rawValues)
+        {
+            foreach (var raw in rawValues)
+            {
+                if (string.IsNullOrWhiteSpace(raw)) continue;
+
+                foreach (var path in SplitSemicolonList(raw))
+                {
+                    var trimmed = path?.Trim();
+                    if (!string.IsNullOrWhiteSpace(trimmed))
+                        yield return trimmed;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Splits by semicolon (;) but allows escaping a semicolon using '\;'.
+        /// All other backslashes are preserved (important for Windows paths).
+        /// Example:  "C:\Temp\file1.txt;C:\Data\semi\;colon.txt"
+        ///           -> ["C:\Temp\file1.txt", "C:\Data\semi;colon.txt"]
+        /// </summary>
+        private static IEnumerable<string> SplitSemicolonList(string s)
+        {
+            var results = new List<string>();
+            var sb = new StringBuilder();
+
+            for (int i = 0; i < s.Length; i++)
+            {
+                char ch = s[i];
+
+                // Handle escaped semicolon "\;"
+                if (ch == '\\' && i + 1 < s.Length && s[i + 1] == ';')
+                {
+                    sb.Append(';');
+                    i++; // skip the ';' after backslash
+                }
+                else if (ch == ';')
+                {
+                    results.Add(sb.ToString());
+                    sb.Clear();
+                }
+                else
+                {
+                    sb.Append(ch);
+                }
+            }
+
+            results.Add(sb.ToString());
+            return results;
+        }
+
         private static void PrintHelp()
         {
             Console.WriteLine("Usage:");
-            Console.WriteLine("  TbComposeCli --to <email> [--subject <text>] [--body <text>] [--attach <path>]...");
+            Console.WriteLine("  TbComposeCli --to <email> [--subject <text>] [--body <text>] [--attach <files>]...");
             Console.WriteLine();
             Console.WriteLine("Options:");
             Console.WriteLine("  --to <email>           Recipient email address (required).");
             Console.WriteLine("  --subject <text>       Message subject (optional).");
             Console.WriteLine("  --body <text>          Message body (optional). Use quotes for spaces/newlines.");
-            Console.WriteLine("  --attach <path>        Attachment file path. Repeat for multiple files.");
+            Console.WriteLine("  --attach <files>       One or more attachment file paths separated by ';'.");
+            Console.WriteLine("                         You can repeat --attach. To include a literal ';' in a file name, use \\;.");
             Console.WriteLine("  --help, -h, /?         Show this help.");
             Console.WriteLine();
             Console.WriteLine("Examples:");
             Console.WriteLine(@"  TbComposeCli --to user@example.com --subject ""Quarterly report"" --body ""Hi,\r\nSee files.""");
-            Console.WriteLine(@"  TbComposeCli --to user@example.com --attach ""C:\Temp\Report Q4.pdf"" --attach ""C:\Temp\Revenue,Summary.xlsx""");
+            Console.WriteLine(@"  TbComposeCli --to user@example.com --attach ""C:\Temp\Report Q4.pdf;C:\Temp\Revenue Summary.xlsx""");
+            Console.WriteLine(@"  TbComposeCli --to user@example.com --attach ""D:\Docs\a.pdf"" --attach ""D:\Docs\b.jpg;D:\Docs\c.xlsx""");
+            Console.WriteLine(@"  TbComposeCli --to user@example.com --attach ""C:\Data\semi\;colon.txt""   (file name contains ';')");
             Console.WriteLine();
             Console.WriteLine("Notes:");
             Console.WriteLine("  * This opens Thunderbird's Compose window; user must click Send.");
@@ -164,16 +228,25 @@ namespace ThuderbirdLauncher
 
             if (attachmentPaths != null)
             {
+
+                var fileUrls = new List<string>();
+
                 foreach (var path in attachmentPaths)
                 {
                     if (string.IsNullOrWhiteSpace(path)) continue;
 
-                    // We validated existence in Main; do a soft check anyway
-                    // Convert to file:// URL and let URI handle proper escaping (spaces -> %20, commas -> %2C).
-                    var fileUri = new Uri(Path.GetFullPath(path), UriKind.Absolute);
-                    string fileUrl = fileUri.AbsoluteUri;
+                    string absolutePath = Path.GetFullPath(path);
 
-                    composeParts.Add($"attachment='{fileUrl}'");
+                    // Build a proper file URI (handles spaces, commas, etc.).
+                    var fileUri = new Uri(absolutePath);
+                    fileUrls.Add(fileUri.AbsoluteUri);
+                }
+
+                if (fileUrls.Count > 0)
+                {
+                    // IMPORTANT: one attachment field, multiple URLs separated by commas
+                    var joined = string.Join(",", fileUrls);
+                    composeParts.Add($"attachment='{joined}'");
                 }
             }
 
